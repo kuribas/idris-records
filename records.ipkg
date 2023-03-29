@@ -1,0 +1,8 @@
+package records
+version = 0.0.1
+
+modules = Records
+brief="extensible, specification based records"
+authors = "Kristof Bastiaensen"
+sourcedir = "src"
+license = "BSD3"
