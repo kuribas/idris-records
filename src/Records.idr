@@ -153,6 +153,14 @@ get : (0 lbl:String) ->
 get s @{FirstField} ((s :-> x) :: y) = x
 get s @{(NextField later)} (_ :: xs) = get s @{later} xs
 
+export 
+(!!) : {0 f: FieldToType k} ->
+       Record r f ->
+       (0 lbl:String) ->
+       HasField lbl t r => 
+       (f (MkFieldSpec lbl t))
+r !! s = get s r
+
 export
 getMaybe : {0 f:FieldToType k} -> (0 s:String) -> HasOptionalField s t r => Record r f -> Maybe (f (MkFieldSpec s t))
 getMaybe _ @{NoSuchField} _ = Nothing
@@ -171,6 +179,35 @@ mapRecord : {spec : RecordSpec k} ->
             Record spec g
 mapRecord h [] = []
 mapRecord h ((lbl :-> y) :: z) = (lbl :-> h y) :: mapRecord h z
+
+export
+sequenceRecord : Applicative m =>
+                 {spec : RecordSpec k} -> 
+                 {0 f:FieldToType k} -> 
+                 Record spec (m . f) ->
+                 m (Record spec f)
+sequenceRecord [] = pure []
+sequenceRecord ((lbl :-> x) :: y) =
+  (\x', xs' => lbl :-> x' :: xs') <$> x <*> sequenceRecord y
+
+export 
+traverseRecord : Applicative m =>
+                 {spec : RecordSpec k} -> 
+                 {0 f:FieldToType k} -> 
+                 ({a : k} -> {lbl : String} -> f (MkFieldSpec lbl a) -> m (f (MkFieldSpec lbl a))) ->
+                 Record spec f ->
+                 m (Record spec f)
+traverseRecord g [] = pure []
+traverseRecord g ((lbl :-> x) :: y) = 
+  (\x', xs' => lbl :-> x' :: xs') <$> g x <*> traverseRecord g y
+
+-- | convenient specialization of sequenceRecord, to bind applicative values.
+aseq : Applicative m =>
+       {spec : RecordSpec Type} -> 
+       Record spec (m . FieldSpecType) -> 
+       m (SimpleRecord spec)
+aseq = sequenceRecord
+
 
 export
 fillRecord : {0 f : FieldToType k} -> (spec:RecordSpec k) -> ({s : String} -> {a : k} -> f (MkFieldSpec s a)) -> Record spec f
