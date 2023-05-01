@@ -40,23 +40,27 @@ public export
 FieldToType : Type -> Type
 FieldToType k = {s:String} -> Field s k -> Type
 
+public export
+mapSpec : (f:FieldToType k) -> RecordSpec k -> RecordSpec Type
+mapSpec f [] = []
+mapSpec f ((lbl, spec) :: xs) = (lbl, f (lbl :->: spec)) :: mapSpec f xs
+
+||| Simple record, parametrised over Types only
+public export
+data SimpleRecord : RecordSpec Type -> Type where
+    Nil : SimpleRecord Nil
+    (::) :  {0 lbl:String}
+         -> {0 t: Type}
+         -> RecordField lbl t
+         -> SimpleRecord xs
+         -> SimpleRecord ((lbl, t) :: xs)
+
 ||| A strongly specified record.  The type contains the specification,
 ||| and a function mapping that specification for each field to a
 ||| concrete type.
 public export
-data Record : RecordSpec k -> FieldToType k -> Type where
-    Nil : {0 f:FieldToType k} -> Record Nil f
-    (::) :  {0 lbl:String}
-         -> {0 f: FieldToType k}
-         -> {0 t: k}
-         -> RecordField lbl (f (lbl :->: t))
-         -> Record xs f
-         -> Record ((lbl, t) :: xs) f
-
-||| Simple record with types as specification
-public export
-SimpleRecord : RecordSpec Type -> Type
-SimpleRecord s = Record s FieldSpec
+Record : RecordSpec k -> FieldToType k -> Type
+Record s f = SimpleRecord (mapSpec f s)
 
 ||| Constraint that holds for all values in a list.
 public export
@@ -226,8 +230,9 @@ mapRecord : {specs : RecordSpec k} ->
             ({lbl:String} -> {spec : k} -> f (lbl :->: spec) -> g (lbl :->: spec)) -> 
             Record specs f -> 
             Record specs g
-mapRecord h [] = []
-mapRecord h ((lbl :-> y) :: z) = (lbl :-> h y) :: mapRecord h z
+mapRecord {specs = []} h [] = []
+mapRecord {specs = ((lbl, _) :: _)} h ((lbl :-> y) :: z) = 
+  (lbl :-> h y) :: mapRecord h z
 
 ||| Run all the effects for each field.
 public export
@@ -236,8 +241,8 @@ sequenceRecord : Applicative m =>
                  {0 f:FieldToType k} -> 
                  Record spec (m . f) ->
                  m (Record spec f)
-sequenceRecord [] = pure []
-sequenceRecord ((lbl :-> x) :: y) =
+sequenceRecord {spec=[]} [] = pure []
+sequenceRecord {spec=((lbl, _) :: _)} ((lbl :-> x) :: y) =
   (\x', xs' => lbl :-> x' :: xs') <$> x <*> sequenceRecord y
 
 ||| Apply an effectful function over all fields of the record.
@@ -252,8 +257,8 @@ traverseRecord : Applicative m =>
                   m (g (lbl :->: spec))) ->
                  Record specs f ->
                  m (Record specs g)
-traverseRecord f [] = pure []
-traverseRecord f ((lbl :-> x) :: y) = 
+traverseRecord {specs=[]} f [] = pure []
+traverseRecord {specs=(lbl, _)::_} f ((lbl :-> x) :: y) = 
   (\x', xs' => lbl :-> x' :: xs') <$> f x <*> traverseRecord f y
 
 ||| convenient specialization of sequenceRecord, to bind applicative
@@ -262,7 +267,7 @@ public export
 aseq : Applicative m =>
        {spec : RecordSpec Type} -> 
        Record spec (m . FieldSpec) -> 
-       m (SimpleRecord spec)
+       m (Record spec FieldSpec)
 aseq = sequenceRecord
 
 ||| Create a record by applying a function over each field in the RecordSpec.
@@ -272,7 +277,8 @@ mapRecordSpec : {0 f : FieldToType k} ->
                 ((label:String) -> (spec:k) -> f (label :->: spec)) -> 
                 Record spec f
 mapRecordSpec [] v = []
-mapRecordSpec ((s, x) :: xs) v = (s :-> v s x) :: mapRecordSpec xs v
+mapRecordSpec ((lbl, x) :: xs) v = 
+  (lbl :-> v lbl x) :: mapRecordSpec xs v
 
 ||| Create a record by applying an effectful function over each field in the RecordSpec.
 public export
@@ -295,8 +301,8 @@ zipWithRecord :  {spec : RecordSpec k} ->
                  Record spec f -> 
                  Record spec g -> 
                  Record spec h
-zipWithRecord f [] [] = []
-zipWithRecord f (s :-> x :: z) (s :-> y :: w) = 
+zipWithRecord {spec=[]} f [] [] = []
+zipWithRecord {spec=(s,_)::_} f (s :-> x :: z) (s :-> y :: w) = 
   s :-> f x y :: zipWithRecord f z w
 
 namespace Hkd
@@ -346,8 +352,8 @@ foldMapRecord : Monoid m =>
                 ({s:String} -> {a : k} -> f (s :->: a) -> m) -> 
                 Record spec f -> 
                 m
-foldMapRecord f [] = neutral
-foldMapRecord f ((s :-> x) :: y) = f x <+> foldMapRecord f y
+foldMapRecord {spec=[]} f [] = neutral
+foldMapRecord {spec=(s,_)::_} f ((s :-> x) :: y) = f x <+> foldMapRecord f y
 
 ||| Successively combine the fields using the provided function,
 ||| starting with the element that is in the final position i.e. the
@@ -355,12 +361,12 @@ foldMapRecord f ((s :-> x) :: y) = f x <+> foldMapRecord f y
 export
 foldrRecord : {f : FieldToType k} -> 
               {spec : RecordSpec k} ->
-               ({s : String} -> {a : k} -> f (s :->: a) -> acc -> acc) -> 
-               acc -> 
-               Record spec f -> 
-               acc
-foldrRecord f acc [] = acc
-foldrRecord f acc ((s :-> x) :: y) =  f x $ foldrRecord f acc y
+              ({s : String} -> {a : k} -> f (s :->: a) -> acc -> acc) -> 
+              acc -> 
+              Record spec f -> 
+              acc
+foldrRecord {spec=[]} f acc [] = acc
+foldrRecord {spec=(s,_)::_} f acc ((s :-> x) :: y) =  f x $ foldrRecord f acc y
 
 ||| Successively combine the fields using the provided function,
 ||| starting with the element that is in the first position i.e. the
@@ -372,8 +378,8 @@ foldlRecord : {f : FieldToType k} ->
               acc -> 
               Record spec f -> 
               acc
-foldlRecord f acc [] = acc
-foldlRecord f acc ((s :-> x) :: y) = foldlRecord f (f acc x) y
+foldlRecord {spec=[]} f acc [] = acc
+foldlRecord {spec=(s,_)::_} f acc ((s :-> x) :: y) = foldlRecord f (f acc x) y
 
 ||| create a record with all the labels of the spec.
 export
@@ -409,11 +415,12 @@ concatRecords : {spec1 : RecordSpec k} ->
                 Record spec1 f -> 
                 Record spec2 f -> 
                 Record (spec1 ++ spec2) f
-concatRecords [] y = y
-concatRecords (x :: z) y = x :: concatRecords z y
+concatRecords {spec1 = []} x y = y
+concatRecords {spec1 = ((lbl, _) :: _)} ((lbl :-> x) :: z) y = 
+  (lbl :-> x) :: concatRecords z y
 
-||| A subset of a RecordSpec, given a list of labels.
-public export
+-- ||| A subset of a RecordSpec, given a list of labels.
+-- public export
 RecordSubset : {spec : RecordSpec k} -> 
                List (LabelOf spec) ->
                RecordSpec k
