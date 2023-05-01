@@ -18,7 +18,9 @@ public export
 RecordSpec : Type -> Type
 RecordSpec k = List (String, k)
 
-||| A field (label value pair) in the record, with the given label and type.  The label is erased at the value level, but included for program clarity.
+||| A field (label value pair) in the record, with the given label and
+||| type.  The label is erased at the value level, but included to
+||| make it easy to see which field is used in the code.
 public export
 data RecordField : String -> Type -> Type where
   (:->) : (0 s:String) -> t -> RecordField s t
@@ -33,12 +35,14 @@ public export
 FieldSpec : Field s t -> t
 FieldSpec (s :->: t) = t
 
-||| The type of a field.
+||| The actual type of a field in the record.
 public export
 FieldToType : Type -> Type
 FieldToType k = {s:String} -> Field s k -> Type
 
-||| A strongly specified record.  The type contains the specification, and a function mapping each that specification for each field to a concrete type.
+||| A strongly specified record.  The type contains the specification,
+||| and a function mapping that specification for each field to a
+||| concrete type.
 public export
 data Record : RecordSpec k -> FieldToType k -> Type where
     Nil : {0 f:FieldToType k} -> Record Nil f
@@ -81,7 +85,8 @@ public export
 HasFields : (l:RecordSpec k) -> RecordSpec k -> Type
 HasFields l r = AllConstraints (HasField' r)  l
 
-||| A label of a spec.  Contains an automatic proof that the label is actually in the spec.
+||| A label of a spec.  Contains a hidden (auto) proof that the label
+||| is actually in the RecordSpec, and a hidden reference to the field Spec.
 public export
 data LabelOf : RecordSpec k -> Type where
   MkLabel : {0 spec : RecordSpec k} ->
@@ -98,7 +103,7 @@ labelString (MkLabel lbl) = lbl
 ||| Extract the spec from the label
 export
 labelSpec : {0 spec : RecordSpec k} -> LabelOf spec -> k
-labelSpec (MkLabel {t=t} _) = t
+labelSpec (MkLabel {t} _) = t
 
 public export
 data IsNothing : Maybe a -> Type where
@@ -107,7 +112,7 @@ data IsNothing : Maybe a -> Type where
 ||| proof that an optional field with the given spec exists.  The spec
 ||| must be either present with the right type, or be absent.  This is
 ||| written in terms of HasField, so it is isomorphic to Maybe
-||| Natural, which has a more efficient representation.
+||| Natural, which has an efficient runtime representation.
 public export
 data HasOptionalField : (s:String) -> (t:k) -> RecordSpec k -> Type where
   NoSuchField : IsNothing (lookup s specs) => HasOptionalField s t specs
@@ -138,6 +143,8 @@ public export
 data NubFields : RecordSpec k -> RecordSpec k -> RecordSpec k ->Type where
   MkNubFields : {spec:RecordSpec k} -> {fields: RecordSpec k} -> NubFields spec fields (remFields spec fields)
 
+||| Proof that a record contains some mandatory fields, some optional
+||| fields, and some remaining fields.
 public export
 data WithRecordFields :  RecordSpec k
                       -> RecordSpec k 
@@ -152,16 +159,14 @@ data WithRecordFields :  RecordSpec k
                      => NubFields spec (optional ++ mandatory) other
                      => WithRecordFields spec mandatory optional other
 
--- RecordFieldSpec : (l:RecordSpec k) -> (lbl:String) -> ({label:String} -> k -> Type) -> HasField lbl t l  => Type
--- RecordFieldSpec ((lbl, t) :: _) lbl f @{FirstField} = f {label=lbl} t
--- RecordFieldSpec (_ :: xs) s f @{NextField x} = RecordFieldSpec xs s f
-
+||| Create an integer index of the field from the HasField proof.
 export
 hasFieldToIndex : HasField s t r -> Integer
 hasFieldToIndex FirstField = 0
 hasFieldToIndex (NextField prevField) = 1 + hasFieldToIndex prevField
 %builtin NaturalToInteger natToInteger
 
+||| Get a field value by label
 public export
 get : (0 lbl:String) ->
       {0 f: FieldToType k} ->
@@ -171,6 +176,7 @@ get : (0 lbl:String) ->
 get s @{FirstField} ((s :-> x) :: y) = x
 get s @{(NextField later)} (_ :: xs) = get s @{later} xs
 
+||| Get a field specification from the RecordSpec by label
 public export
 SpecGet : (0 lbl:String) ->
           (r : RecordSpec k) ->
@@ -180,6 +186,7 @@ SpecGet : (0 lbl:String) ->
 SpecGet lbl ((lbl, t) :: _) @{FirstField} = t
 SpecGet lbl ((t, w) :: xs) @{(NextField x)} = SpecGet lbl xs
 
+||| Operator version of get with arguments flipped.
 export 
 (!!) : {0 f: FieldToType k} ->
        Record r f ->
@@ -188,15 +195,18 @@ export
        (f (lbl :->: t))
 r !! s = get s r
 
+||| Get an optional field from a spec, as Maybe value
 public export
 getMaybe : {0 f:FieldToType k} -> (0 s:String) -> HasOptionalField s t r => Record r f -> Maybe (f (s :->: t))
 getMaybe _ @{NoSuchField} _ = Nothing
 getMaybe s @{FieldExists} rl = Just $ get s rl
 
+||| Get an optional field, return the given default if it is not found.
 public export
 getOpt : {0 f:FieldToType k} -> (0 s:String) -> HasOptionalField s t r => Lazy (f (s :->: t)) -> Record r f -> f (s :->: t)
 getOpt s def r = fromMaybe def $ getMaybe s r
 
+||| Set a field in a record.
 export
 set : {0 f: FieldToType k} ->
       {0 t : k} -> 
@@ -208,6 +218,7 @@ set : {0 f: FieldToType k} ->
 set (lbl :-> x) @{FirstField} (lbl :-> _ :: r) = (lbl :-> x) :: r
 set x @{(NextField nf)} (y :: z) = y :: set x z
 
+||| Map a function over all fields of a record.
 public export
 mapRecord : {specs : RecordSpec k} -> 
             {0 f:FieldToType k} -> 
@@ -218,6 +229,7 @@ mapRecord : {specs : RecordSpec k} ->
 mapRecord h [] = []
 mapRecord h ((lbl :-> y) :: z) = (lbl :-> h y) :: mapRecord h z
 
+||| Run all the effects for each field.
 public export
 sequenceRecord : Applicative m =>
                  {spec : RecordSpec k} -> 
@@ -228,6 +240,7 @@ sequenceRecord [] = pure []
 sequenceRecord ((lbl :-> x) :: y) =
   (\x', xs' => lbl :-> x' :: xs') <$> x <*> sequenceRecord y
 
+||| Apply an effectful function over all fields of the record.
 public export 
 traverseRecord : Applicative m =>
                  {specs : RecordSpec k} -> 
@@ -243,7 +256,8 @@ traverseRecord f [] = pure []
 traverseRecord f ((lbl :-> x) :: y) = 
   (\x', xs' => lbl :-> x' :: xs') <$> f x <*> traverseRecord f y
 
--- | convenient specialization of sequenceRecord, to bind applicative values.
+||| convenient specialization of sequenceRecord, to bind applicative
+||| values.  Useful as replacement of applicative do in haskell.
 public export
 aseq : Applicative m =>
        {spec : RecordSpec Type} -> 
@@ -251,7 +265,7 @@ aseq : Applicative m =>
        m (SimpleRecord spec)
 aseq = sequenceRecord
 
-
+||| Create a record by applying a function over each field in the RecordSpec.
 public export
 mapRecordSpec : {0 f : FieldToType k} -> 
                 (spec:RecordSpec k) ->
@@ -260,6 +274,7 @@ mapRecordSpec : {0 f : FieldToType k} ->
 mapRecordSpec [] v = []
 mapRecordSpec ((s, x) :: xs) v = (s :-> v s x) :: mapRecordSpec xs v
 
+||| Create a record by applying an effectful function over each field in the RecordSpec.
 public export
 traverseRecordSpec : Applicative m =>
                      {0 f : FieldToType k} -> 
@@ -270,6 +285,7 @@ traverseRecordSpec [] _ = pure []
 traverseRecordSpec ((s, x) :: xs) f = 
   (\x, xs => (s :-> x) :: xs) <$> f s x <*>  traverseRecordSpec xs f
 
+||| Zip two records for each field in the record.
 public export
 zipWithRecord :  {spec : RecordSpec k} -> 
                  {0 f : FieldToType k} ->
@@ -284,17 +300,18 @@ zipWithRecord f (s :-> x :: z) (s :-> y :: w) =
   s :-> f x y :: zipWithRecord f z w
 
 namespace Hkd
+  ||| Higher kinded heterogenous list
   public export
   data HkdList : (k -> Type) -> List k -> Type where
     Nil : HkdList f []
     (::) : {0 f:k -> Type} -> f a -> HkdList f b -> HkdList f (a :: b)
 
+||| map a Hkd List
 export
 mapHkd : {0 g : k -> Type} -> (forall a . f a -> g a) -> HkdList f s -> HkdList g s
 mapHkd f [] = []
 mapHkd f (x :: y) = f x :: mapHkd f y
 
-export
 splitRow : {0 fs : List (FieldToType k)} ->
            {0 as : RecordSpec k} ->
            HkdList (Record ((s, a) :: as)) fs -> 
@@ -305,6 +322,9 @@ splitRow (((s :-> x) :: r) :: y) =
   let (ls, rs) = splitRow y 
   in (x :: ls, r :: rs)
 
+||| Zip a (heterogenous) list of records, by zipping each row over a
+||| function.  The function takes a list of all the values in that row
+||| for each of the records.
 export
 zipWithManyRecord : {0 fs : List (FieldToType k)} ->
                     {g : FieldToType k} -> 
@@ -318,6 +338,7 @@ zipWithManyRecord f l with (spec)
       let (l1, ls) = splitRow l
       in s1 :-> f l1 :: zipWithManyRecord f ls
 
+||| Maps each field to a value and combine them.
 export      
 foldMapRecord : Monoid m =>
                 {spec : RecordSpec k} ->
@@ -328,6 +349,9 @@ foldMapRecord : Monoid m =>
 foldMapRecord f [] = neutral
 foldMapRecord f ((s :-> x) :: y) = f x <+> foldMapRecord f y
 
+||| Successively combine the fields using the provided function,
+||| starting with the element that is in the final position i.e. the
+||| right-most position.
 export
 foldrRecord : {f : FieldToType k} -> 
               {spec : RecordSpec k} ->
@@ -338,6 +362,9 @@ foldrRecord : {f : FieldToType k} ->
 foldrRecord f acc [] = acc
 foldrRecord f acc ((s :-> x) :: y) =  f x $ foldrRecord f acc y
 
+||| Successively combine the fields using the provided function,
+||| starting with the element that is in the first position i.e. the
+||| left-most position.
 export
 foldlRecord : {f : FieldToType k} -> 
               {spec : RecordSpec k} -> 
@@ -348,15 +375,18 @@ foldlRecord : {f : FieldToType k} ->
 foldlRecord f acc [] = acc
 foldlRecord f acc ((s :-> x) :: y) = foldlRecord f (f acc x) y
 
+||| create a record with all the labels of the spec.
 export
 recordLabels : {spec : RecordSpec k} -> Record spec (const String)
 recordLabels {spec = []} = []
 recordLabels {spec = ((lbl, x) :: xs)} = (lbl :-> lbl) :: recordLabels {spec = xs}
 
+||| Type of the interface implementation for a given field.
 public export
 EntryDict : ((String, k) -> Type) -> FieldToType k
 EntryDict c (s :->: t) = c (s, t)
 
+||| Create a record with the interface implementations for each field of the spec.
 export
 recordDicts : (0 c : (String, k) -> Type) -> 
               (spec : RecordSpec k) -> 
@@ -365,21 +395,24 @@ recordDicts : (0 c : (String, k) -> Type) ->
 recordDicts c [] = []
 recordDicts c ((s, t) :: xs) {cs=(c1,_)} = s :-> c1 :: recordDicts c xs
 
+||| Create a record with the specs for each field from the record spec.
 export
 recordSpecs : (l : RecordSpec k) -> Record l (const k)
 recordSpecs [] = []
 recordSpecs ((s, spec) :: xs) = s :-> spec :: recordSpecs xs
 
+||| Concatenate two records
 export
-appendRecords : {spec1 : RecordSpec k} ->
+concatRecords : {spec1 : RecordSpec k} ->
                 {spec2 : RecordSpec k} -> 
                 {f : FieldToType k} ->
                 Record spec1 f -> 
                 Record spec2 f -> 
                 Record (spec1 ++ spec2) f
-appendRecords [] y = y
-appendRecords (x :: z) y = x :: appendRecords z y
+concatRecords [] y = y
+concatRecords (x :: z) y = x :: concatRecords z y
 
+||| A subset of a RecordSpec, given a list of labels.
 public export
 RecordSubset : {spec : RecordSpec k} -> 
                List (LabelOf spec) ->
@@ -388,6 +421,7 @@ RecordSubset [] = []
 RecordSubset {spec} ((MkLabel {t} lbl) :: xs) =
   (lbl, t) :: RecordSubset xs
 
+||| Create a subset of a record, given a list of labels.
 export
 recordSubset : {spec : RecordSpec k} -> 
                {f : FieldToType k} ->
